@@ -1,5 +1,5 @@
-#ifndef MA_CONFIG_H
-#define MA_CONFIG_H
+#ifndef _MA_CONFIG_BOARD_H_
+#define _MA_CONFIG_BOARD_H_
 
 #define MA_OSAL_PTHREAD                 1
 #define MA_USE_FILESYSTEM               1
@@ -7,9 +7,9 @@
 #define MA_USE_EXCEPTION                1
 #define MA_DEBUG_LEVEL                  3
 
-#define PRODUCT_NAME_PREFIX          "raspberrypi"
-#define PRODUCT_NAME_SUFFIX          "raspberrypi"
-#define PORT_DEVICE_NAME             "raspberrypi"
+#define PRODUCT_NAME_PREFIX             "raspberry"
+#define PRODUCT_NAME_SUFFIX             "pi5"
+#define PORT_DEVICE_NAME                "raspberry"
 
 #define CONFIG_MA_FILESYSTEM            1
 #define CONFIG_MA_FILESYSTEM_POSIX      1
@@ -29,4 +29,4 @@
 #define ma_abort                        abort
 #define ma_reset                        abort
 
-#endif  // MA_CONFIG_H
+#endif  // _MA_CONFIG_BOARD_H_
