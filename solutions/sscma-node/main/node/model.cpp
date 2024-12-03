@@ -10,7 +10,7 @@ using namespace ma::model;
 static constexpr char TAG[] = "ma::node::model";
 
 
-#define DEFAULT_MODEL "/home/pi/hailo-rpi5-examples/resources/yolov8s_h8l.hef"
+#define DEFAULT_MODEL "/usr/share/sscma-node/models/model.hef"
 
 ModelNode::ModelNode(std::string id)
     : Node("model", id), uri_(""), debug_(true), trace_(false), counting_(false), count_(0), engine_(nullptr), model_(nullptr), thread_(nullptr), camera_(nullptr), frame_(30) {}
@@ -29,6 +29,7 @@ void ModelNode::threadEntry() {
     int32_t height         = static_cast<const ma_img_t*>(model_->getInput())->height;
     int32_t take           = 0;
     cv2::Mat* frame        = nullptr;
+    ma_tick_t preprocess   = 0;
 
     switch (model_->getType()) {
         case MA_MODEL_TYPE_IMCLS:
@@ -50,6 +51,7 @@ void ModelNode::threadEntry() {
         json reply = json::object({{"type", MA_MSG_TYPE_EVT}, {"name", "invoke"}, {"code", MA_OK}, {"data", {{"count", ++count_}}}});
 
         // resize & letterbox
+        preprocess          = Tick::current();
         int ih              = image.rows;
         int iw              = image.cols;
         int oh              = height;
@@ -64,6 +66,7 @@ void ModelNode::threadEntry() {
         int right  = (ow - nw) - left;
         cv2::copyMakeBorder(image, image, top, bottom, left, right, cv2::BORDER_CONSTANT, cv2::Scalar::all(114));
         cv2::cvtColor(image, image, cv2::COLOR_BGR2RGB);
+        preprocess = Tick::current() - preprocess;
 
         reply["data"]["resolution"] = json::array({width, height});
 
@@ -71,6 +74,8 @@ void ModelNode::threadEntry() {
         tensor.size        = height * width * 3;
         tensor.data.data   = reinterpret_cast<void*>(image.data);
         engine_->setInput(0, tensor);
+
+        reply["data"]["labels"] = json::array();
 
         if (model_->getOutputType() == MA_OUTPUT_TYPE_BBOX) {
             Detector* detector     = static_cast<Detector*>(model_);
@@ -89,6 +94,11 @@ void ModelNode::threadEntry() {
                                                       static_cast<int16_t>(_bboxes[i].h * height),
                                                       static_cast<int8_t>(_bboxes[i].score * 100),
                                                       _bboxes[i].target});
+                    if (labels_.size() > _bboxes[i].target) {
+                        reply["data"]["labels"].push_back(labels_[_bboxes[i].target]);
+                    } else {
+                        reply["data"]["labels"].push_back(std::string("N/A-" + std::to_string(_bboxes[i].target)));
+                    }
                     if (counting_) {
                         counter_.update(tracks[i], _bboxes[i].x * 100, _bboxes[i].y * 100);
                     }
@@ -104,6 +114,11 @@ void ModelNode::threadEntry() {
                                                       static_cast<int16_t>(_bboxes[i].h * height),
                                                       static_cast<int8_t>(_bboxes[i].score * 100),
                                                       _bboxes[i].target});
+                    if (labels_.size() > _bboxes[i].target) {
+                        reply["data"]["labels"].push_back(labels_[_bboxes[i].target]);
+                    } else {
+                        reply["data"]["labels"].push_back(std::string("N/A-" + std::to_string(_bboxes[i].target)));
+                    }
                 }
             }
             if (counting_) {
@@ -118,6 +133,11 @@ void ModelNode::threadEntry() {
             reply["data"]["classes"] = json::array();
             for (auto& result : _results) {
                 reply["data"]["classes"].push_back({static_cast<int8_t>(result.score * 100), result.target});
+                if (labels_.size() > result.target) {
+                    reply["data"]["labels"].push_back(result.target);
+                } else {
+                    reply["data"]["labels"].push_back(std::string("N/A-" + std::to_string(result.target)));
+                }
             }
         } else if (model_->getOutputType() == MA_OUTPUT_TYPE_KEYPOINT) {
             PoseDetector* pose_detector = static_cast<PoseDetector*>(model_);
@@ -135,6 +155,11 @@ void ModelNode::threadEntry() {
                             static_cast<int16_t>(result.box.h * height),
                             static_cast<int8_t>(result.box.score * 100),
                             result.box.target};
+                if (labels_.size() > result.box.target) {
+                    reply["data"]["labels"].push_back(labels_[result.box.target]);
+                } else {
+                    reply["data"]["labels"].push_back(std::string("N/A-" + std::to_string(result.box.target)));
+                }
                 reply["data"]["keypoints"].push_back({box, pts});
             }
         } else if (model_->getOutputType() == MA_OUTPUT_TYPE_SEGMENT) {
@@ -149,7 +174,11 @@ void ModelNode::threadEntry() {
                             static_cast<int16_t>(result.box.h * height),
                             static_cast<int8_t>(result.box.score * 100),
                             result.box.target};
-
+                if (labels_.size() > result.box.target) {
+                    reply["data"]["labels"].push_back(labels_[result.box.target]);
+                } else {
+                    reply["data"]["labels"].push_back(std::string("N/A-" + std::to_string(result.box.target)));
+                }
                 json mask = {static_cast<int16_t>(result.mask.width), static_cast<int16_t>(result.mask.height)};
                 reply["data"]["segments"].push_back({box, mask});
             }
@@ -157,11 +186,7 @@ void ModelNode::threadEntry() {
 
         const auto _perf = model_->getPerf();
 
-        reply["data"]["perf"].push_back({_perf.preprocess, _perf.inference, _perf.postprocess});
-
-        if (labels_.size() > 0) {
-            reply["data"]["labels"] = labels_;
-        }
+        reply["data"]["perf"].push_back({_perf.preprocess + Tick::toMilliseconds(preprocess), _perf.inference, _perf.postprocess});
 
 
         if (debug_) {
